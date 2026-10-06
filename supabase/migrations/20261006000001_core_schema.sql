@@ -1,0 +1,540 @@
+-- =============================================================================
+-- Core schema: users, candidate profiles, resumes, jobs, matching, applications,
+-- billing, AI usage, audit and background work.
+--
+-- Conventions
+--   * Every user-owned row carries user_id and is protected by RLS (see 0003).
+--   * Writes that must not be user-controlled (matches, AI usage, audit, ingestion)
+--     are performed with the service role from server code only.
+--   * "provenance" records where a candidate fact came from:
+--       extracted = present in the uploaded resume (with an evidence quote)
+--       inferred  = derived by the system (always shown to the user as such)
+--       user      = typed or confirmed by the user
+-- =============================================================================
+
+create schema if not exists extensions;
+create extension if not exists vector with schema extensions;
+create extension if not exists pg_trgm with schema extensions;
+create extension if not exists pgcrypto with schema extensions;
+
+-- ---------------------------------------------------------------------------
+-- Enums
+-- ---------------------------------------------------------------------------
+create type public.plan_tier as enum ('free', 'pro');
+create type public.provenance as enum ('extracted', 'inferred', 'user');
+create type public.remote_type as enum ('remote', 'hybrid', 'onsite', 'unknown');
+create type public.seniority_level as enum
+  ('intern', 'junior', 'mid', 'senior', 'lead', 'principal', 'executive', 'unknown');
+create type public.verification_status as enum ('official', 'third_party', 'flagged');
+create type public.application_status as enum
+  ('saved', 'interested', 'preparing', 'applied', 'interview', 'rejected', 'offer', 'withdrawn');
+create type public.source_kind as enum
+  ('greenhouse', 'lever', 'ashby', 'remotive', 'arbeitnow', 'remoteok', 'adzuna', 'jsonld');
+create type public.resume_status as enum ('uploaded', 'parsing', 'parsed', 'failed');
+create type public.task_status as enum ('queued', 'running', 'done', 'failed');
+create type public.run_status as enum ('running', 'success', 'partial', 'failed');
+create type public.match_band as enum ('high', 'possible', 'low');
+
+-- ---------------------------------------------------------------------------
+-- Helpers
+-- ---------------------------------------------------------------------------
+create or replace function public.set_updated_at()
+returns trigger language plpgsql as $$
+begin
+  new.updated_at = now();
+  return new;
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- Users
+-- ---------------------------------------------------------------------------
+create table public.profiles (
+  id uuid primary key references auth.users (id) on delete cascade,
+  email text,
+  full_name text,
+  role text not null default 'user' check (role in ('user', 'admin')),
+  -- null = keep resume files until the user deletes them
+  resume_retention_days integer check (resume_retention_days is null or resume_retention_days between 1 and 3650),
+  onboarding_completed boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create trigger profiles_updated_at before update on public.profiles
+  for each row execute function public.set_updated_at();
+
+create or replace function public.is_admin()
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin');
+$$;
+
+-- ---------------------------------------------------------------------------
+-- Candidate profile
+-- ---------------------------------------------------------------------------
+create table public.candidate_profiles (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null unique references public.profiles (id) on delete cascade,
+  headline text,
+  summary text,
+  years_experience numeric(4,1),
+  years_experience_provenance public.provenance,
+  seniority public.seniority_level not null default 'unknown',
+  seniority_provenance public.provenance,
+  role_families text[] not null default '{}',
+  industries text[] not null default '{}',
+  preferred_locations text[] not null default '{}',
+  -- ISO 3166-1 alpha-2 codes where the user can legally work without sponsorship
+  authorized_countries text[] not null default '{}',
+  needs_sponsorship boolean,
+  remote_preference text not null default 'remote_only'
+    check (remote_preference in ('remote_only', 'remote_or_hybrid', 'any')),
+  base_country text,
+  timezone text,
+  salary_min integer check (salary_min is null or salary_min >= 0),
+  salary_currency text default 'USD',
+  languages text[] not null default '{}',
+  contact jsonb not null default '{}'::jsonb,
+  source_resume_id uuid,
+  confirmed_at timestamptz,
+  embedding extensions.vector(1024),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create trigger candidate_profiles_updated_at before update on public.candidate_profiles
+  for each row execute function public.set_updated_at();
+
+create table public.resumes (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  storage_path text not null,
+  file_name text not null,
+  mime_type text not null check (mime_type in (
+    'application/pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document')),
+  size_bytes integer not null check (size_bytes > 0 and size_bytes <= 5242880),
+  sha256 text not null,
+  status public.resume_status not null default 'uploaded',
+  raw_text text,
+  parse_error text,
+  parsed_at timestamptz,
+  is_primary boolean not null default true,
+  delete_after timestamptz,
+  created_at timestamptz not null default now()
+);
+create index resumes_user_idx on public.resumes (user_id, created_at desc);
+create unique index resumes_one_primary on public.resumes (user_id) where is_primary;
+
+alter table public.candidate_profiles
+  add constraint candidate_profiles_source_resume_fk
+  foreign key (source_resume_id) references public.resumes (id) on delete set null;
+
+create table public.skills (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  slug text not null unique,
+  category text,
+  aliases text[] not null default '{}'
+);
+
+create table public.candidate_skills (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  candidate_profile_id uuid not null references public.candidate_profiles (id) on delete cascade,
+  skill_id uuid references public.skills (id) on delete set null,
+  name text not null,
+  normalized text not null,
+  years numeric(4,1),
+  provenance public.provenance not null,
+  evidence text,
+  created_at timestamptz not null default now(),
+  unique (candidate_profile_id, normalized)
+);
+create index candidate_skills_user_idx on public.candidate_skills (user_id);
+
+create table public.experiences (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  candidate_profile_id uuid not null references public.candidate_profiles (id) on delete cascade,
+  employer text not null,
+  title text not null,
+  location text,
+  start_date date,
+  end_date date,
+  is_current boolean not null default false,
+  description text,
+  highlights text[] not null default '{}',
+  skills text[] not null default '{}',
+  provenance public.provenance not null,
+  evidence text,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now(),
+  check (end_date is null or start_date is null or end_date >= start_date)
+);
+create index experiences_profile_idx on public.experiences (candidate_profile_id, sort_order);
+
+create table public.educations (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  candidate_profile_id uuid not null references public.candidate_profiles (id) on delete cascade,
+  kind text not null default 'degree' check (kind in ('degree', 'certification', 'course')),
+  institution text not null,
+  qualification text,
+  field text,
+  level text check (level is null or level in ('secondary', 'associate', 'bachelor', 'master', 'doctorate', 'other')),
+  start_date date,
+  end_date date,
+  provenance public.provenance not null,
+  evidence text,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now()
+);
+create index educations_profile_idx on public.educations (candidate_profile_id, sort_order);
+
+create table public.resume_versions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  resume_id uuid references public.resumes (id) on delete cascade,
+  job_id uuid,
+  kind text not null check (kind in ('parsed', 'tailored', 'user_edit')),
+  content jsonb not null,
+  content_text text,
+  created_at timestamptz not null default now()
+);
+create index resume_versions_user_idx on public.resume_versions (user_id, created_at desc);
+
+-- ---------------------------------------------------------------------------
+-- Jobs
+-- ---------------------------------------------------------------------------
+create table public.job_sources (
+  id uuid primary key default gen_random_uuid(),
+  kind public.source_kind not null,
+  name text not null,
+  slug text not null unique,
+  -- connector-specific settings, e.g. {"board": "gitlab"} or {"url": "https://..."}
+  config jsonb not null default '{}'::jsonb,
+  enabled boolean not null default true,
+  -- true when listings come straight from the employer's own applicant tracking system
+  is_official boolean not null default false,
+  attribution text,
+  terms_url text,
+  min_interval_minutes integer not null default 360 check (min_interval_minutes >= 15),
+  last_run_at timestamptz,
+  last_success_at timestamptz,
+  last_error text,
+  consecutive_failures integer not null default 0,
+  created_at timestamptz not null default now()
+);
+
+create table public.employers (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  normalized_name text not null unique,
+  website text,
+  domain text,
+  created_at timestamptz not null default now()
+);
+
+create table public.jobs (
+  id uuid primary key default gen_random_uuid(),
+  source_id uuid not null references public.job_sources (id) on delete cascade,
+  external_id text not null,
+  employer_id uuid references public.employers (id) on delete set null,
+  employer_name text not null,
+  title text not null,
+  normalized_title text not null,
+  description_text text not null default '',
+  location_raw text,
+  locations text[] not null default '{}',
+  countries text[] not null default '{}',
+  remote_type public.remote_type not null default 'unknown',
+  -- e.g. {'Worldwide'} or {'US', 'CA'}; empty = not stated
+  remote_regions text[] not null default '{}',
+  employment_type text,
+  seniority public.seniority_level not null default 'unknown',
+  department text,
+  salary_min integer,
+  salary_max integer,
+  salary_currency text,
+  salary_period text check (salary_period is null or salary_period in ('year', 'month', 'hour')),
+  posted_at timestamptz,
+  deadline_at timestamptz,
+  apply_url text,
+  source_url text,
+  apply_domain text,
+  is_official_link boolean not null default false,
+  verification_status public.verification_status not null default 'third_party',
+  verification_flags text[] not null default '{}',
+  fingerprint text not null,
+  duplicate_of uuid references public.jobs (id) on delete set null,
+  is_active boolean not null default true,
+  requirements_extracted_by text not null default 'heuristic'
+    check (requirements_extracted_by in ('heuristic', 'ai')),
+  first_seen_at timestamptz not null default now(),
+  last_seen_at timestamptz not null default now(),
+  search tsvector generated always as (
+    setweight(to_tsvector('english', coalesce(title, '')), 'A') ||
+    setweight(to_tsvector('english', coalesce(employer_name, '')), 'B') ||
+    setweight(to_tsvector('english', left(coalesce(description_text, ''), 20000)), 'C')
+  ) stored,
+  embedding extensions.vector(1024),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (source_id, external_id)
+);
+create trigger jobs_updated_at before update on public.jobs
+  for each row execute function public.set_updated_at();
+create index jobs_active_idx on public.jobs (is_active, posted_at desc) where duplicate_of is null;
+create index jobs_fingerprint_idx on public.jobs (fingerprint);
+create index jobs_search_idx on public.jobs using gin (search);
+create index jobs_title_trgm_idx on public.jobs using gin (normalized_title extensions.gin_trgm_ops);
+
+alter table public.resume_versions
+  add constraint resume_versions_job_fk foreign key (job_id) references public.jobs (id) on delete set null;
+
+create table public.job_requirements (
+  id uuid primary key default gen_random_uuid(),
+  job_id uuid not null references public.jobs (id) on delete cascade,
+  kind text not null check (kind in
+    ('skill', 'experience', 'education', 'certification', 'authorization', 'location', 'language', 'other')),
+  text text not null,
+  normalized text,
+  importance text not null default 'required' check (importance in ('required', 'preferred')),
+  min_years numeric(4,1),
+  extracted_by text not null default 'heuristic' check (extracted_by in ('heuristic', 'ai'))
+);
+create index job_requirements_job_idx on public.job_requirements (job_id);
+
+create table public.job_matches (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  job_id uuid not null references public.jobs (id) on delete cascade,
+  score integer not null check (score between 0 and 100),
+  band public.match_band not null,
+  breakdown jsonb not null,
+  reasons text[] not null default '{}',
+  gaps text[] not null default '{}',
+  disqualifiers text[] not null default '{}',
+  uncertain text[] not null default '{}',
+  engine_version text not null,
+  computed_at timestamptz not null default now(),
+  unique (user_id, job_id)
+);
+create index job_matches_user_score_idx on public.job_matches (user_id, score desc);
+
+-- ---------------------------------------------------------------------------
+-- Applications
+-- ---------------------------------------------------------------------------
+create table public.tailored_applications (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  job_id uuid not null references public.jobs (id) on delete cascade,
+  status text not null default 'draft' check (status in ('draft', 'reviewed', 'exported')),
+  -- requirement -> candidate evidence mapping
+  evidence_map jsonb not null default '[]'::jsonb,
+  recommendations jsonb not null default '[]'::jsonb,
+  resume_content jsonb,
+  resume_text text,
+  missing_info jsonb not null default '[]'::jsonb,
+  checklist jsonb not null default '[]'::jsonb,
+  fabrication_warnings jsonb not null default '[]'::jsonb,
+  model text,
+  reviewed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (user_id, job_id)
+);
+create trigger tailored_applications_updated_at before update on public.tailored_applications
+  for each row execute function public.set_updated_at();
+
+create table public.cover_letters (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  tailored_application_id uuid not null unique references public.tailored_applications (id) on delete cascade,
+  content text not null,
+  edited_by_user boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create trigger cover_letters_updated_at before update on public.cover_letters
+  for each row execute function public.set_updated_at();
+
+create table public.application_answers (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  tailored_application_id uuid not null references public.tailored_applications (id) on delete cascade,
+  question text not null,
+  answer text not null default '',
+  needs_user_input boolean not null default false,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now()
+);
+create index application_answers_app_idx on public.application_answers (tailored_application_id, sort_order);
+
+create table public.saved_jobs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  job_id uuid not null references public.jobs (id) on delete cascade,
+  hidden boolean not null default false,
+  viewed_at timestamptz,
+  note text,
+  created_at timestamptz not null default now(),
+  unique (user_id, job_id)
+);
+
+create table public.applications (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  job_id uuid not null references public.jobs (id) on delete cascade,
+  status public.application_status not null default 'interested',
+  tailored_application_id uuid references public.tailored_applications (id) on delete set null,
+  applied_at timestamptz,
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (user_id, job_id)
+);
+create trigger applications_updated_at before update on public.applications
+  for each row execute function public.set_updated_at();
+create index applications_user_idx on public.applications (user_id, updated_at desc);
+
+-- ---------------------------------------------------------------------------
+-- Billing, usage, audit
+-- ---------------------------------------------------------------------------
+create table public.subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null unique references public.profiles (id) on delete cascade,
+  plan public.plan_tier not null default 'free',
+  status text not null default 'active' check (status in ('active', 'past_due', 'canceled', 'trialing')),
+  provider text,
+  provider_customer_id text,
+  provider_subscription_id text,
+  current_period_end timestamptz,
+  -- pay-as-you-go credits for users who prefer not to subscribe
+  credits integer not null default 0 check (credits >= 0),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create trigger subscriptions_updated_at before update on public.subscriptions
+  for each row execute function public.set_updated_at();
+
+create table public.ai_usage (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references public.profiles (id) on delete set null,
+  feature text not null,
+  provider text not null,
+  model text not null,
+  input_tokens integer not null default 0,
+  output_tokens integer not null default 0,
+  cost_usd numeric(10,6) not null default 0,
+  ok boolean not null default true,
+  created_at timestamptz not null default now()
+);
+create index ai_usage_user_feature_idx on public.ai_usage (user_id, feature, created_at desc);
+create index ai_usage_created_idx on public.ai_usage (created_at desc);
+
+create table public.audit_logs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references public.profiles (id) on delete set null,
+  actor text not null default 'user' check (actor in ('user', 'system', 'admin')),
+  action text not null,
+  entity text,
+  entity_id uuid,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+create index audit_logs_user_idx on public.audit_logs (user_id, created_at desc);
+
+-- ---------------------------------------------------------------------------
+-- Background work
+-- ---------------------------------------------------------------------------
+create table public.ingestion_runs (
+  id uuid primary key default gen_random_uuid(),
+  source_id uuid not null references public.job_sources (id) on delete cascade,
+  status public.run_status not null default 'running',
+  started_at timestamptz not null default now(),
+  finished_at timestamptz,
+  fetched integer not null default 0,
+  inserted integer not null default 0,
+  updated integer not null default 0,
+  deactivated integer not null default 0,
+  flagged integer not null default 0,
+  duplicates integer not null default 0,
+  errors jsonb not null default '[]'::jsonb
+);
+create index ingestion_runs_source_idx on public.ingestion_runs (source_id, started_at desc);
+
+create table public.task_queue (
+  id uuid primary key default gen_random_uuid(),
+  kind text not null check (kind in ('ingest_source', 'match_user', 'purge_expired')),
+  payload jsonb not null default '{}'::jsonb,
+  status public.task_status not null default 'queued',
+  attempts integer not null default 0,
+  max_attempts integer not null default 3,
+  run_after timestamptz not null default now(),
+  locked_at timestamptz,
+  last_error text,
+  dedupe_key text,
+  created_at timestamptz not null default now()
+);
+create index task_queue_ready_idx on public.task_queue (status, run_after);
+create unique index task_queue_dedupe_idx on public.task_queue (dedupe_key)
+  where dedupe_key is not null and status in ('queued', 'running');
+
+-- Atomically claim up to p_limit ready tasks (safe with concurrent workers).
+create or replace function public.claim_tasks(p_limit integer)
+returns setof public.task_queue
+language plpgsql security definer set search_path = public as $$
+begin
+  -- recover tasks whose worker died
+  update public.task_queue
+     set status = 'queued', locked_at = null
+   where status = 'running' and locked_at < now() - interval '15 minutes';
+
+  return query
+  update public.task_queue t
+     set status = 'running', locked_at = now(), attempts = t.attempts + 1
+   where t.id in (
+     select id from public.task_queue
+      where status = 'queued' and run_after <= now()
+      order by run_after
+      limit p_limit
+      for update skip locked)
+  returning t.*;
+end $$;
+
+create or replace function public.enqueue_task(p_kind text, p_payload jsonb, p_dedupe_key text default null)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare v_id uuid;
+begin
+  insert into public.task_queue (kind, payload, dedupe_key)
+  values (p_kind, coalesce(p_payload, '{}'::jsonb), p_dedupe_key)
+  on conflict (dedupe_key) where dedupe_key is not null and status in ('queued', 'running')
+  do nothing
+  returning id into v_id;
+  return v_id;
+end $$;
+
+-- Count a user's usage of an AI feature in the current calendar month.
+create or replace function public.monthly_usage(p_user uuid, p_feature text)
+returns integer language sql stable security definer set search_path = public as $$
+  select count(*)::integer from public.ai_usage
+   where user_id = p_user and feature = p_feature and ok
+     and created_at >= date_trunc('month', now());
+$$;
+
+-- ---------------------------------------------------------------------------
+-- New user bootstrap
+-- ---------------------------------------------------------------------------
+create or replace function public.handle_new_user()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.profiles (id, email, full_name)
+  values (new.id, new.email, coalesce(new.raw_user_meta_data ->> 'full_name', new.raw_user_meta_data ->> 'name'));
+  insert into public.candidate_profiles (user_id) values (new.id);
+  insert into public.subscriptions (user_id) values (new.id);
+  insert into public.audit_logs (user_id, actor, action) values (new.id, 'system', 'account.created');
+  return new;
+end $$;
+
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
