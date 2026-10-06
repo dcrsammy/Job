@@ -1,22 +1,30 @@
-# Calls the background worker every 10 minutes: schedules due job sources,
-# runs ingestion, refreshes matches and applies data-retention deletes.
-# Set repository secrets APP_URL (e.g. https://aptly.example.com) and CRON_SECRET.
+# Background worker: refreshes job sources, updates matches and applies
+# data-retention deletes. Runs on GitHub's servers, not on Cloudflare.
+# Needs repository secrets SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.
 name: Background worker
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/30 * * * *"
   workflow_dispatch:
+concurrency:
+  group: worker
+  cancel-in-progress: false
 jobs:
-  tick:
+  run:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
-      - name: Run worker tick
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Run worker
         env:
-          APP_URL: ${{ secrets.APP_URL }}
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then echo "APP_URL/CRON_SECRET not set; skipping"; exit 0; fi
-          for i in 1 2 3; do
-            curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/tick?limit=3" && echo && sleep 5
-          done
+          if [ -z "$SUPABASE_URL" ]; then echo "SUPABASE_URL not set; skipping"; exit 0; fi
+          npx tsx scripts/worker.mts

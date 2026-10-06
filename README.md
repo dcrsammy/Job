@@ -30,7 +30,7 @@ The brand name lives in one place: `src/lib/config.ts` (`site.name`).
 - **Next.js 15** (App Router, TypeScript, Tailwind v4), deployed to **Cloudflare Workers** with OpenNext
 - **Supabase**: Postgres (+ pgvector, pg_trgm), Auth, private Storage, row-level security on every table
 - **AI layer** (`src/lib/ai/provider.ts`): provider-agnostic `generateStructured()` with forced tool calls and Zod validation. Ships with Claude (`claude-sonnet-5-5` for parsing and tailoring, `claude-haiku-4-5` for job analysis). Every call is logged with token counts and cost
-- **Background work**: a Postgres task queue (`claim_tasks` with `SKIP LOCKED`) driven by `/api/cron/tick`, which a GitHub Actions schedule calls every 10 minutes
+- **Background work**: a Postgres task queue (`claim_tasks` with `SKIP LOCKED`), worked by `scripts/worker.mts` on a GitHub Actions schedule every 30 minutes (so heavy ingestion never runs on the Worker). `/api/cron/tick` does the same over HTTP if you prefer
 
 ```
 src/lib/
@@ -91,9 +91,9 @@ CI (`.github/workflows/ci.yml`) runs all of these plus a production build.
 1. `npx wrangler login`
 2. Add secrets: `npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY` (repeat for `CRON_SECRET`, `ANTHROPIC_API_KEY`). Set `NEXT_PUBLIC_*` values in the build environment.
 3. `npm run deploy`
-4. In GitHub, add repository secrets `APP_URL` and `CRON_SECRET`. The **Background worker** workflow will then run every 10 minutes.
+4. In GitHub, add repository secrets `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. The **Background worker** workflow then refreshes jobs every 30 minutes.
 
-Use the **Workers Paid** plan: resume parsing and ingestion need more CPU time and subrequests than the free plan allows.
+The Workers Free plan allows only 10 ms of CPU per request. Resume upload and matching can exceed that, so use **Workers Paid** ($5/month) for real users.
 
 ## Job data compliance
 
