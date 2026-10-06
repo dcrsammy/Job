@@ -81,6 +81,7 @@ export async function markApplied(form: FormData) {
   if (existing) await supabase.from("applications").update(patch).eq("id", existing.id);
   else await supabase.from("applications").insert({ user_id: user.id, job_id: app.job_id, ...patch });
   await audit(createAdminClient(), user.id, "application.applied", { entity: "job", entityId: app.job_id });
+  await createAdminClient().from("job_matches").delete().eq("user_id", user.id).eq("job_id", app.job_id);
   revalidatePath("/", "layout");
 }
 

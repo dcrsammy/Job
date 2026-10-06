@@ -23,7 +23,9 @@ export type ApplicationStatus =
   | "interview"
   | "rejected"
   | "offer"
-  | "withdrawn";
+  | "withdrawn"
+  | "no_response"
+  | "closed";
 
 export const SENIORITY_ORDER: Seniority[] = [
   "intern",

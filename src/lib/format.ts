@@ -51,4 +51,9 @@ export const STATUS_LABEL: Record<string, string> = {
   rejected: "Rejected",
   offer: "Offer",
   withdrawn: "Withdrawn",
+  no_response: "No response",
+  closed: "Listing closed",
 };
+
+/** Statuses after which a job should never be recommended again. */
+export const FINISHED_STATUSES = ["applied", "interview", "offer", "rejected", "withdrawn", "no_response", "closed"] as const;

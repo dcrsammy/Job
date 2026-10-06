@@ -728,6 +728,16 @@ grant execute on function public.match_candidate_jobs(text[], timestamptz, integ
 grant execute on function public.source_stats() to service_role;
 grant execute on function public.expired_resumes(integer) to service_role;
 
+-- >>> supabase/migrations/20261006000005_application_followup.sql
+-- Application follow-up: automatic "No response" after 30 days, and
+-- "Listing closed" when a job disappears before the user applied.
+alter type public.application_status add value if not exists 'no_response';
+alter type public.application_status add value if not exists 'closed';
+
+alter table public.applications
+  add column if not exists auto_closed_at timestamptz,
+  add column if not exists auto_closed_reason text;
+
 -- >>> supabase/seed.sql
 -- Initial job sources. Employer boards (Greenhouse, Lever, Ashby) are the
 -- employers' own public job-board APIs, so listings link to the official

@@ -69,7 +69,14 @@ export async function runMatchingForUser(db: SupabaseClient, userId: string): Pr
   const since = new Date(Date.now() - matching.maxJobAgeDays * 86_400_000).toISOString();
   const { data: ids, error } = await db.rpc("match_candidate_jobs", { p_terms: terms, p_since: since, p_limit: matching.candidatePool });
   if (error) throw new Error(`match_candidate_jobs: ${error.message}`);
-  const jobIds = (ids ?? []).map((r: { id: string }) => r.id);
+  // Jobs already applied to (or closed) are never suggested again.
+  const { data: doneRows } = await db
+    .from("applications")
+    .select("job_id")
+    .eq("user_id", userId)
+    .in("status", ["applied", "interview", "offer", "rejected", "withdrawn", "no_response", "closed"]);
+  const done = new Set((doneRows ?? []).map((r) => r.job_id as string));
+  const jobIds = (ids ?? []).map((r: { id: string }) => r.id).filter((id: string) => !done.has(id));
 
   const results: { jobId: string; m: MatchResult }[] = [];
   for (let i = 0; i < jobIds.length; i += 200) {

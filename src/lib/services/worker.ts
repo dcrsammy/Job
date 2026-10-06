@@ -50,7 +50,8 @@ export async function processTasks(db: SupabaseClient, limit = 3, budgetMs = 25_
         const r = await runMatchingForUser(db, task.payload.user_id);
         detail = `scored ${r.scored}, kept ${r.kept}`;
       } else if (task.kind === "purge_expired") {
-        detail = `purged ${await purgeExpiredResumes(db)}`;
+        const f = await followUpApplications(db);
+        detail = `purged ${await purgeExpiredResumes(db)}; no response ${f.noResponse}; closed ${f.closed}`;
       }
       await db.from("task_queue").update({ status: "done", last_error: null }).eq("id", task.id);
       processed.push({ id: task.id, kind: task.kind, ok: true, detail });
@@ -75,4 +76,35 @@ export async function enqueueMatchingForActiveUsers(db: SupabaseClient) {
   for (const r of data ?? []) {
     await db.rpc("enqueue_task", { p_kind: "match_user", p_payload: { user_id: r.user_id }, p_dedupe_key: `match:${r.user_id}` });
   }
+}
+
+export const NO_RESPONSE_AFTER_DAYS = 30;
+
+/**
+ * Daily housekeeping for the tracker:
+ * - applied more than 30 days ago with no update → "No response"
+ * - not yet applied, and the listing has gone from the employer's site → "Listing closed"
+ * Users can move any of these back; a manual change clears the automatic flag.
+ */
+export async function followUpApplications(db: SupabaseClient, now = new Date()): Promise<{ noResponse: number; closed: number }> {
+  const cutoff = new Date(now.getTime() - NO_RESPONSE_AFTER_DAYS * 86_400_000).toISOString();
+  const stamp = now.toISOString();
+
+  const { data: stale } = await db
+    .from("applications")
+    .update({ status: "no_response", auto_closed_at: stamp, auto_closed_reason: `No reply ${NO_RESPONSE_AFTER_DAYS} days after applying` })
+    .eq("status", "applied")
+    .lt("applied_at", cutoff)
+    .lt("updated_at", cutoff)
+    .select("user_id, job_id");
+  for (const r of stale ?? []) await db.from("audit_logs").insert({ user_id: r.user_id, actor: "system", action: "application.no_response", entity: "job", entity_id: r.job_id });
+
+  const { data: open } = await db.from("applications").select("id, user_id, job_id, jobs!inner(is_active)").in("status", ["saved", "interested", "preparing"]).eq("jobs.is_active", false).limit(1000);
+  let closed = 0;
+  for (const r of open ?? []) {
+    await db.from("applications").update({ status: "closed", auto_closed_at: stamp, auto_closed_reason: "The listing was removed from the employer's site" }).eq("id", r.id);
+    await db.from("audit_logs").insert({ user_id: r.user_id, actor: "system", action: "application.listing_closed", entity: "job", entity_id: r.job_id });
+    closed++;
+  }
+  return { noResponse: stale?.length ?? 0, closed };
 }
