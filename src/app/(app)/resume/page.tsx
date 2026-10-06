@@ -7,12 +7,14 @@ import { Notice, PageHeader, Panel, SectionTitle, Tag } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { shortDate } from "@/lib/format";
 import { getAllowance } from "@/lib/services/usage";
+import { planName } from "@/lib/config";
 import { DownloadResume } from "@/components/download-resume";
 
 export const metadata: Metadata = { title: "My resume" };
 
-export default async function ResumePage() {
+export default async function ResumePage({ searchParams }: { searchParams: Promise<{ plan?: string }> }) {
   const { supabase, user } = await requireUser();
+  const sp = await searchParams;
   const [{ data: resumes }, allowance] = await Promise.all([
     supabase.from("resumes").select("id, file_name, size_bytes, status, parse_error, created_at, is_primary, delete_after").eq("user_id", user.id).order("created_at", { ascending: false }),
     getAllowance(supabase, user.id, "resume_parse").catch(() => null),
@@ -27,6 +29,11 @@ export default async function ResumePage() {
       />
       <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
         <div className="flex flex-col gap-6">
+          {sp.plan === "requested" ? (
+            <Notice tone="info">
+              Welcome! You're on Basic for now. We'll switch you to the plan you chose as soon as it's activated. <Link href="/settings#plan" className="underline underline-offset-2">See your plan</Link>
+            </Notice>
+          ) : null}
           {current?.status === "failed" ? <Notice tone="error">We couldn't read your last upload: {current.parse_error}</Notice> : null}
           <ResumeUpload replacing={!!current} />
           {current ? (
@@ -36,7 +43,7 @@ export default async function ResumePage() {
           ) : null}
           {allowance ? (
             <p className="text-[13.5px] text-ink-3 num">
-              {Math.max(0, allowance.limit - allowance.used)} of {allowance.limit} resume analyses left this month on the {allowance.plan} plan
+              {Math.max(0, allowance.limit - allowance.used)} of {allowance.limit} resume analyses left this month on the {planName(allowance.plan)} plan
               {allowance.credits ? `, plus ${allowance.credits} credits` : ""}.
             </p>
           ) : null}

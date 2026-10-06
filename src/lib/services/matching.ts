@@ -1,11 +1,12 @@
 // Runs the matching engine for one user and stores the results.
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { matching } from "../config";
+import { matching, planFeatures } from "../config";
 import { prepareCandidate, scoreMatch, ENGINE_VERSION } from "../matching/engine";
 import { ROLE_FAMILY_BY_KEY } from "../matching/role-families";
 import { skillDisplayName } from "../skills/taxonomy";
 import type { JobForMatch, JobRequirement, MatchResult } from "../types";
 import { loadCandidate, toCandidateForMatch } from "./candidate";
+import { getPlan } from "./usage";
 
 interface JobRowForMatch {
   id: string;
@@ -88,7 +89,8 @@ export async function runMatchingForUser(db: SupabaseClient, userId: string): Pr
   }
 
   results.sort((a, b) => b.m.score - a.m.score);
-  const keep = results.slice(0, matching.keepTop);
+  const keepTop = planFeatures[await getPlan(db, userId)].matchesKept ?? matching.keepTop;
+  const keep = results.slice(0, keepTop);
   for (let i = 0; i < keep.length; i += 200) {
     const rows = keep.slice(i, i + 200).map(({ jobId, m }) => matchToRow(userId, jobId, m));
     const { error: upErr } = await db.from("job_matches").upsert(rows, { onConflict: "user_id,job_id" });

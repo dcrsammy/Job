@@ -1,11 +1,17 @@
 import { signOut } from "@/app/actions/auth";
 import { MobileNav, NavLinks } from "@/components/app-nav";
 import { Logo } from "@/components/logo";
+import Link from "next/link";
 import { requireUser } from "@/lib/auth";
+import { effectivePlan, planInfo } from "@/lib/config";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const { supabase, user } = await requireUser();
-  const { data: profile } = await supabase.from("profiles").select("full_name, role").eq("id", user.id).single();
+  const [{ data: profile }, { data: sub }] = await Promise.all([
+    supabase.from("profiles").select("full_name, role").eq("id", user.id).single(),
+    supabase.from("subscriptions").select("plan, status, current_period_end, requested_plan").eq("user_id", user.id).maybeSingle(),
+  ]);
+  const plan = effectivePlan(sub);
   const isAdmin = profile?.role === "admin";
   const name = profile?.full_name || user.email;
 
@@ -20,6 +26,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </nav>
         <div className="mt-4 border-t border-line px-2 pt-4">
           <p className="truncate text-[13.5px] font-semibold" title={name ?? ""}>{name}</p>
+          <p className="text-[13px] text-ink-3">
+            {planInfo[plan].name} plan
+            {plan !== "premium" ? (
+              <>
+                {" · "}
+                <Link href="/settings#plan" className="underline underline-offset-2 hover:text-ink">{sub?.requested_plan ? "Upgrade requested" : "Upgrade"}</Link>
+              </>
+            ) : null}
+          </p>
           <form action={signOut}>
             <button className="mt-1 text-[13.5px] text-ink-3 underline-offset-2 hover:text-ink hover:underline">Sign out</button>
           </form>

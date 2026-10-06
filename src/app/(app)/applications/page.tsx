@@ -115,8 +115,14 @@ export default async function ApplicationsPage() {
                           </select>
                           <SubmitButton variant="secondary" className="h-8 px-2 text-[12.5px]" pending="…">Save</SubmitButton>
                         </form>
-                        <div className="mt-2 flex gap-3 text-[12.5px]">
+                        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[12.5px]">
                           <Link href={`/jobs/${a.job_id}/apply`} className="underline underline-offset-2">{a.tailored_application_id ? "Open builder" : "Prepare"}</Link>
+                          {a.status === "applied" || a.status === "no_response" ? (
+                            <Link href={`/jobs/${a.job_id}/follow-up`} className="underline underline-offset-2">Follow up</Link>
+                          ) : null}
+                          {a.status === "interview" || a.status === "offer" || a.status === "applied" ? (
+                            <Link href={`/jobs/${a.job_id}/interview`} className="underline underline-offset-2">Interview prep</Link>
+                          ) : null}
                           <form action={removeApplication}>
                             <input type="hidden" name="jobId" value={a.job_id} />
                             <button className="text-ink-3 hover:text-block">Remove</button>

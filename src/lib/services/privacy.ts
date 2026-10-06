@@ -18,6 +18,7 @@ const USER_TABLES = [
   "subscriptions",
   "ai_usage",
   "audit_logs",
+  "application_extras",
 ] as const;
 
 export async function exportUserData(db: SupabaseClient, userId: string): Promise<Record<string, unknown>> {

@@ -21,6 +21,11 @@ const ACTIVITY: Record<string, string> = {
   "application.applied": "Marked a job as applied",
   "application.status": "Updated an application",
   "data.exported": "Downloaded your data",
+  "plan.requested": "Asked for a plan upgrade",
+  "plan.changed": "Your plan changed",
+  "plan.downgraded": "Switched to Basic",
+  "premium.interview_prep": "Prepared for an interview",
+  "premium.follow_up": "Drafted a follow-up email",
 };
 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ password?: string }> }) {

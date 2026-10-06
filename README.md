@@ -22,8 +22,8 @@ The brand name lives in one place: `src/lib/config.ts` (`site.name`).
 | Export | Copy, Word (.docx), plain text |
 | Tracker | Interested → Preparing → Applied → Interviewing → Outcome |
 | Privacy | Download all data (JSON), delete resume data, auto-delete files after 30/90/180/365 days, delete account |
-| Admin | Source health, run now, enable/disable, add sources, ingestion runs, failed tasks, AI cost |
-| Limits | Free: 3 resume analyses and 3 tailored applications a month; Pro limits and credits in `src/lib/config.ts` (payments not wired yet) |
+| Admin console (`/admin`) | Overview (live activity, sign-ups, plan requests), Users (search, full per-user view; set plan, credits, role; reset link; confirm email; suspend; re-run matching; wipe or delete), Activity (every audit event and AI call), Applications (all users, fix status), Jobs & sources (find, hide or flag jobs; source health, run now, add), System (task queue retry/delete, housekeeping, AI cost, config check) |
+| Plans | **Basic** (free: answers with [placeholders] to fill in), **Pro** (every answer written, employer's own form questions), **Premium** (Pro + interview prep, follow-up emails, more matches). Chosen at sign-up; paid plans are requests until an admin approves them in Admin → Overview (payments not wired yet). Limits, features and prices live in `src/lib/config.ts` |
 
 ## Architecture
 
@@ -105,7 +105,7 @@ The Workers Free plan allows only 10 ms of CPU per request. Resume upload and ma
 
 ## Known gaps / next steps
 
-- Payments (Stripe or Paystack) for Pro and credits. The `subscriptions` table and limits are already in place.
+- Payments (Stripe or Paystack) for Pro, Premium and credits. Plan requests, `subscriptions.current_period_end` and limits are already in place; a payment webhook only needs to set `plan`, `status` and `current_period_end`.
 - Embedding-based semantic matching (the `embedding` columns exist; scoring is rule-based today).
 - The privacy notice and terms are templates. Have them reviewed before launch.
 - Phase 2 features from the brief (alerts, interview prep, salary insights) are not built.

@@ -9,7 +9,8 @@ import { cx, ExternalButton, Notice, PageHeader, Panel, SectionTitle, Tag } from
 import { requireUser } from "@/lib/auth";
 import { STATUS_LABEL } from "@/lib/format";
 import { getAllowance } from "@/lib/services/usage";
-import { planFeatures } from "@/lib/config";
+import { planFeatures, planInfo } from "@/lib/config";
+import { PlanUpsell } from "@/components/plans";
 import type { EvidenceItem } from "@/lib/tailoring/generate";
 import type { GuardWarning } from "@/lib/tailoring/guard";
 
@@ -32,14 +33,9 @@ function DownloadLinks({ appId, doc }: { appId: string; doc: "resume" | "cover" 
 
 function ProUpsell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-[10px] border border-dashed border-line-strong p-5">
-      <p className="flex items-center gap-2 font-semibold">
-        <Tag tone="tape">Pro</Tag> {children}
-      </p>
-      <p className="mt-1 text-[14px] text-ink-2">
-        Pro writes every answer in full: why you want the job, your strengths, salary, availability. It also answers the questions from the employer's own form. You review and edit before sending.
-      </p>
-    </div>
+    <PlanUpsell needs="pro" title={children}>
+      Pro writes every answer in full: why you want the job, your strengths, salary, availability. It also answers the questions from the employer's own form. You review and edit before sending.
+    </PlanUpsell>
   );
 }
 
@@ -77,7 +73,7 @@ export default async function ApplyPage({ params }: { params: Promise<{ id: stri
       <>
         {header}
         <Panel className="max-w-[720px] p-6">
-          <h2 className="flex items-center gap-2 text-[18px] font-bold">What you'll get {features.completeAnswers ? <Tag tone="tape">Pro</Tag> : null}</h2>
+          <h2 className="flex items-center gap-2 text-[18px] font-bold">What you'll get {features.completeAnswers ? <Tag tone="tape">{planInfo[allowance?.plan ?? "free"].name}</Tag> : null}</h2>
           <ul className="mt-3 list-disc space-y-1.5 pl-5 text-ink-2">
             <li>Each requirement in the listing matched to evidence from your profile, with gaps shown honestly</li>
             <li>A version of your resume reordered and reworded for this job, using only facts you've given us</li>
@@ -221,7 +217,7 @@ export default async function ApplyPage({ params }: { params: Promise<{ id: stri
           </section>
 
           <section aria-labelledby="eq">
-            <SectionTitle aside={features.employerQuestions ? <Tag tone="tape">Pro</Tag> : null}>
+            <SectionTitle aside={features.employerQuestions ? <Tag tone="tape">{planInfo[allowance?.plan ?? "free"].name}</Tag> : null}>
               <span id="eq">Questions from the employer's form</span>
             </SectionTitle>
             {features.employerQuestions ? (
@@ -304,6 +300,15 @@ export default async function ApplyPage({ params }: { params: Promise<{ id: stri
               </form>
               <CopyButton text={app.resume_text ?? ""} label="Copy resume text" />
             </div>
+          </Panel>
+          <Panel className="p-5">
+            <h2 className="flex items-center gap-2 text-[16px] font-bold">
+              Interview prep <Tag tone="tape">Premium</Tag>
+            </h2>
+            <p className="mt-1 text-[13.5px] text-ink-2">Likely interview questions for this job, with answers built from your real experience.</p>
+            <Link href={`/jobs/${id}/interview`} className="mt-3 inline-flex h-9 items-center rounded-md border border-line-strong bg-surface px-3 text-[13.5px] font-semibold hover:border-ink">
+              {features.interviewPrep ? "Open interview prep" : "See what's included"}
+            </Link>
           </Panel>
         </aside>
       </div>

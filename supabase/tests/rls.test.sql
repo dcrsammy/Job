@@ -99,12 +99,33 @@ do $$ declare a uuid; b uuid; n int; begin
   assert n = 0, 'claimed task should not be claimed twice';
 end $$;
 
+-- plans: a plan chosen at sign-up becomes a request; the user starts on Basic
+reset role;
+insert into auth.users (id, email, raw_user_meta_data) values ('33333333-3333-3333-3333-333333333333', 'c@example.com', '{"plan_choice":"premium"}');
+do $$ begin
+  assert (select plan from public.subscriptions where user_id = '33333333-3333-3333-3333-333333333333') = 'free', 'new users start on Basic';
+  assert (select requested_plan from public.subscriptions where user_id = '33333333-3333-3333-3333-333333333333') = 'premium', 'chosen plan is recorded as a request';
+end $$;
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"33333333-3333-3333-3333-333333333333","role":"authenticated"}';
+do $$ begin
+  assert (select count(*) from public.subscriptions) = 1, 'user sees only own subscription';
+  begin
+    update public.subscriptions set plan = 'premium';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+reset role;
+do $$ begin
+  assert (select plan from public.subscriptions where user_id = '33333333-3333-3333-3333-333333333333') = 'free', 'users cannot give themselves a paid plan';
+end $$;
+
 -- account deletion cascades
 reset role;
 delete from auth.users where id = '11111111-1111-1111-1111-111111111111';
 do $$ begin
   assert (select count(*) from public.candidate_skills) = 0, 'skills should cascade';
-  assert (select count(*) from public.profiles) = 1, 'profile should cascade';
+  assert not exists (select 1 from public.profiles where id = '11111111-1111-1111-1111-111111111111'), 'profile should cascade';
 end $$;
 
 rollback;

@@ -40,3 +40,26 @@ export async function removeAccount(_: SettingsState, form: FormData): Promise<S
   await supabase.auth.signOut();
   redirect("/?deleted=1");
 }
+
+/** Ask for Pro or Premium. Until payments are connected an admin activates it. */
+export async function requestPlan(form: FormData) {
+  const { user } = await requireUser();
+  const plan = String(form.get("plan"));
+  const admin = createAdminClient();
+  if (plan === "free") {
+    await admin.from("subscriptions").update({ plan: "free", requested_plan: null, requested_at: null, current_period_end: null }).eq("user_id", user.id);
+    await audit(admin, user.id, "plan.downgraded", { metadata: { plan: "free" } });
+  } else if (plan === "pro" || plan === "premium") {
+    await admin.from("subscriptions").update({ requested_plan: plan, requested_at: new Date().toISOString() }).eq("user_id", user.id);
+    await audit(admin, user.id, "plan.requested", { metadata: { plan } });
+  }
+  revalidatePath("/settings");
+}
+
+export async function cancelPlanRequest() {
+  const { user } = await requireUser();
+  const admin = createAdminClient();
+  await admin.from("subscriptions").update({ requested_plan: null, requested_at: null }).eq("user_id", user.id);
+  await audit(admin, user.id, "plan.request_cancelled");
+  revalidatePath("/settings");
+}

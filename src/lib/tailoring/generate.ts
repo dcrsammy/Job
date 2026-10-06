@@ -113,7 +113,7 @@ function educationLine(e: CandidateEducation): string {
   return out.join(", ");
 }
 
-function factSource(c: TailorCandidate): FactSource {
+export function factSource(c: TailorCandidate): FactSource {
   const parts = [
     c.resumeText,
     c.summary ?? "",
@@ -471,7 +471,7 @@ function buildFacts(c: TailorCandidate): { id: string; text: string }[] {
   return facts;
 }
 
-function candidateBlock(c: TailorCandidate): string[] {
+export function candidateBlock(c: TailorCandidate): string[] {
   return [
     `CANDIDATE: ${c.fullName ?? "(name not given)"}${c.headline ? ` — ${c.headline}` : ""}`,
     `SKILLS: ${c.skills.map((s) => s.name).join(", ")}`,
@@ -484,7 +484,7 @@ function candidateBlock(c: TailorCandidate): string[] {
   ];
 }
 
-function jobBlock(job: TailorJob): string[] {
+export function jobBlock(job: TailorJob): string[] {
   return [
     `JOB: ${job.title} at ${job.employerName} (${job.remoteType}${job.locationRaw ? `, ${job.locationRaw}` : ""})`,
     "",
@@ -658,7 +658,7 @@ export function assembleAiPackage(
   return pkg;
 }
 
-function dedupeWarnings(ws: GuardWarning[]): GuardWarning[] {
+export function dedupeWarnings(ws: GuardWarning[]): GuardWarning[] {
   const seen = new Set<string>();
   return ws.filter((w) => {
     const k = `${w.where}|${w.message}`;

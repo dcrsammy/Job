@@ -1,9 +1,22 @@
 // Usage limits for metered AI features, AI cost tracking and audit logging.
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { planLimits, type MeteredFeature, type PlanTier } from "../config";
+import { effectivePlan, planInfo, planLimits, type MeteredFeature, type PlanTier } from "../config";
 import type { AIUsage } from "../ai/provider";
 
 export class UsageLimitError extends Error {}
+
+export const FEATURE_LABEL: Record<MeteredFeature, string> = {
+  resume_parse: "resume analyses",
+  tailor: "tailored applications",
+  job_analysis: "job analyses",
+  employer_questions: "employer-question answers",
+  interview_prep: "interview preps",
+  follow_up: "follow-up emails",
+};
+
+function requiredPlanFor(feature: MeteredFeature): string {
+  return planLimits.pro[feature] > 0 ? "Pro" : "Premium";
+}
 
 export interface Allowance {
   plan: PlanTier;
@@ -15,14 +28,15 @@ export interface Allowance {
 
 export async function getAllowance(db: SupabaseClient, userId: string, feature: MeteredFeature): Promise<Allowance> {
   const [{ data: sub }, { data: used }] = await Promise.all([
-    db.from("subscriptions").select("plan, status, credits").eq("user_id", userId).maybeSingle(),
+    db.from("subscriptions").select("plan, status, credits, current_period_end").eq("user_id", userId).maybeSingle(),
     db.rpc("monthly_usage", { p_user: userId, p_feature: feature }),
   ]);
-  const plan: PlanTier = sub?.plan === "pro" && sub.status !== "canceled" ? "pro" : "free";
+  const plan = effectivePlan(sub);
   const limit = planLimits[plan][feature];
   const usedN = Number(used ?? 0);
   const credits = sub?.credits ?? 0;
-  return { plan, used: usedN, limit, credits, allowed: usedN < limit || credits > 0 };
+  // Credits top up a plan's allowance; they don't unlock features the plan doesn't include.
+  return { plan, used: usedN, limit, credits, allowed: usedN < limit || (limit > 0 && credits > 0) };
 }
 
 /** Throws UsageLimitError when the user has no allowance or credits left. Returns whether a credit will be consumed. */
@@ -31,8 +45,8 @@ export async function assertAllowance(db: SupabaseClient, userId: string, featur
   if (!a.allowed) {
     throw new UsageLimitError(
       a.limit === 0
-        ? "This is a Pro feature. Upgrade to Pro to use it."
-        : `You've used all ${a.limit} ${feature === "tailor" ? "tailored applications" : feature === "resume_parse" ? "resume analyses" : feature === "employer_questions" ? "employer-question answers" : "job analyses"} included in your ${a.plan} plan this month.`,
+        ? `This isn't included in the ${planInfo[a.plan].name} plan. ${requiredPlanFor(feature)} includes it.`
+        : `You've used all ${a.limit} ${FEATURE_LABEL[feature]} included in your ${planInfo[a.plan].name} plan this month.`,
     );
   }
   return { useCredit: a.used >= a.limit };
@@ -76,8 +90,8 @@ export async function audit(
   });
 }
 
-/** The user's current plan (Pro only while the subscription is active). */
+/** The user's current plan (paid plans only while the subscription is active). */
 export async function getPlan(db: SupabaseClient, userId: string): Promise<PlanTier> {
-  const { data: sub } = await db.from("subscriptions").select("plan, status").eq("user_id", userId).maybeSingle();
-  return sub?.plan === "pro" && sub.status !== "canceled" ? "pro" : "free";
+  const { data: sub } = await db.from("subscriptions").select("plan, status, current_period_end").eq("user_id", userId).maybeSingle();
+  return effectivePlan(sub);
 }

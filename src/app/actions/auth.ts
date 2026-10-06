@@ -41,15 +41,22 @@ export async function signUp(_: FormState, form: FormData): Promise<FormState> {
   });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
   if (form.get("consent") !== "on") return { error: "Please agree to how we use your data to continue." };
+  const choice = String(form.get("plan") ?? "free");
+  const planChoice = choice === "pro" || choice === "premium" ? choice : "free";
   const supabase = await createClient();
   const { data, error } = await supabase.auth.signUp({
     email: parsed.data.email,
     password: parsed.data.password,
-    options: { emailRedirectTo: `${await origin()}/auth/confirm?next=/resume`, data: { full_name: parsed.data.fullName } },
+    options: { emailRedirectTo: `${await origin()}/auth/confirm?next=/resume`, data: { full_name: parsed.data.fullName, plan_choice: planChoice } },
   });
   if (error) return { error: error.message };
-  if (data.session) redirect("/resume");
-  return { message: "Check your email for a link to confirm your account." };
+  if (data.session) redirect(planChoice === "free" ? "/resume" : "/resume?plan=requested");
+  return {
+    message:
+      planChoice === "free"
+        ? "Check your email for a link to confirm your account."
+        : "Check your email for a link to confirm your account. You'll start on Basic while we activate your plan.",
+  };
 }
 
 export async function signInWithGoogle(form: FormData) {

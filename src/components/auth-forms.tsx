@@ -4,6 +4,8 @@ import { useActionState } from "react";
 import { requestPasswordReset, signIn, signUp, updatePassword, type FormState } from "@/app/actions/auth";
 import { Field, Input, Notice } from "./ui";
 import { SubmitButton } from "./submit-button";
+import { PlanPicker } from "./plans";
+import type { PlanTier } from "@/lib/config";
 
 function Feedback({ state }: { state: FormState }) {
   if (state?.error) return <Notice tone="error">{state.error}</Notice>;
@@ -28,7 +30,7 @@ export function SignInForm({ next }: { next?: string }) {
   );
 }
 
-export function SignUpForm() {
+export function SignUpForm({ plan = "free" }: { plan?: PlanTier }) {
   const [state, action] = useActionState(signUp, undefined);
   return (
     <form action={action} className="flex flex-col gap-4">
@@ -42,6 +44,7 @@ export function SignUpForm() {
       <Field label="Password" htmlFor="password" hint="At least 8 characters.">
         <Input id="password" name="password" type="password" autoComplete="new-password" required minLength={8} />
       </Field>
+      <PlanPicker defaultPlan={plan} />
       <label className="flex items-start gap-2 text-[14px] text-ink-2">
         <input type="checkbox" name="consent" className="mt-1 size-4 accent-[var(--ink)]" required />
         <span>
