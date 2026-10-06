@@ -2,6 +2,8 @@ import { signInWithGoogle } from "@/app/actions/auth";
 import { Button } from "./ui";
 
 export function GoogleButton({ next }: { next?: string }) {
+  // Shown only once Google sign-in is enabled in Supabase (Auth → Providers → Google).
+  if (process.env.NEXT_PUBLIC_GOOGLE_AUTH !== "true") return null;
   return (
     <form action={signInWithGoogle}>
       <input type="hidden" name="next" value={next ?? ""} />

@@ -102,9 +102,15 @@ export function formatDates(e: Pick<CandidateExperience, "startDate" | "endDate"
 }
 
 function educationLine(e: CandidateEducation): string {
-  return [e.qualification, e.field && !(e.qualification ?? "").includes(e.field) ? e.field : null, e.institution, e.endDate ? new Date(e.endDate).getUTCFullYear() : null]
-    .filter(Boolean)
-    .join(", ");
+  const parts = [e.qualification, e.field && !(e.qualification ?? "").includes(e.field) ? e.field : null, e.institution, e.endDate ? String(new Date(e.endDate).getUTCFullYear()) : null];
+  const out: string[] = [];
+  for (const p of parts) {
+    if (!p) continue;
+    // Skip parts already contained in another part ("Nanjing University" twice).
+    if (out.some((o) => o.toLowerCase().includes(p.toLowerCase()))) continue;
+    out.push(p);
+  }
+  return out.join(", ");
 }
 
 function factSource(c: TailorCandidate): FactSource {

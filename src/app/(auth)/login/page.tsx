@@ -17,11 +17,13 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         </div>
       ) : null}
       <GoogleButton next={next} />
-      <div className="my-5 flex items-center gap-3 text-[13px] text-ink-3">
-        <span className="h-px flex-1 bg-line" />
-        or with email
-        <span className="h-px flex-1 bg-line" />
-      </div>
+      {process.env.NEXT_PUBLIC_GOOGLE_AUTH === "true" ? (
+        <div className="my-5 flex items-center gap-3 text-[13px] text-ink-3">
+          <span className="h-px flex-1 bg-line" />
+          or with email
+          <span className="h-px flex-1 bg-line" />
+        </div>
+      ) : null}
       <SignInForm next={next} />
       <p className="mt-6 text-ink-2">
         New here? <Link href="/signup" className="font-semibold text-ink underline underline-offset-2">Create an account</Link>

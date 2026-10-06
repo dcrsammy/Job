@@ -65,8 +65,12 @@ export function parseResumeHeuristically(raw: string, now = new Date()): ParsedR
   const email = raw.match(/[\w.+-]+@[\w-]+\.[\w.-]+/)?.[0];
   const phone = raw.match(/(\+?\d[\d\s().-]{7,}\d)/)?.[0]?.trim();
   const withoutEmails = raw.replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, " ");
-  const links = Array.from(new Set(withoutEmails.match(/\b(?:https?:\/\/)?(?:www\.)?(?:linkedin\.com|github\.com|[a-z0-9-]+\.(?:dev|io|com|me|app))\/?[\w\-./~%]*/gi) ?? []))
+  const links = Array.from(
+    new Set(withoutEmails.match(/\b(?:https?:\/\/[^\s,;|]+|(?:www\.)?(?:linkedin\.com|github\.com|gitlab\.com|behance\.net|dribbble\.com)\/[\w\-./~%]+|www\.[a-z0-9-]+\.[a-z.]{2,}[\w\-./~%]*|[a-z0-9-]{3,}\.(?:com|dev|app|me|co|ng|io|net|org)(?:\/[\w\-./~%]*)?)/gi) ?? []),
+  )
     .filter((l) => !l.includes("@"))
+    // "Socket.IO", "Node.js" etc. are skills, not websites.
+    .filter((l) => !/^[A-Z][\w-]*\.(IO|JS|js)$/.test(l) && !findSkills(l).length)
     .slice(0, 5);
   const header = sections.header ?? [];
   const nameLine = header.find((l) => /^[A-Za-z][A-Za-z'.-]+(\s+[A-Za-z][A-Za-z'.-]+){1,3}$/.test(l) && l.length < 40);
