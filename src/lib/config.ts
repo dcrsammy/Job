@@ -10,9 +10,21 @@ export const site = {
 export type PlanTier = "free" | "pro";
 
 /** Metered AI features and their monthly allowance per plan. */
-export const planLimits: Record<PlanTier, { resume_parse: number; tailor: number; job_analysis: number }> = {
-  free: { resume_parse: 3, tailor: 3, job_analysis: 10 },
-  pro: { resume_parse: 30, tailor: 100, job_analysis: 300 },
+export const planLimits: Record<PlanTier, { resume_parse: number; tailor: number; job_analysis: number; employer_questions: number }> = {
+  free: { resume_parse: 3, tailor: 3, job_analysis: 10, employer_questions: 0 },
+  pro: { resume_parse: 30, tailor: 100, job_analysis: 300, employer_questions: 200 },
+};
+
+/**
+ * What each plan unlocks in the Application builder.
+ * - completeAnswers: the AI writes every answer in full (motivation, salary,
+ *   availability, strengths…) instead of leaving [placeholders] for the user.
+ * - employerQuestions: paste the questions from an employer's application
+ *   form and get a full answer to each.
+ */
+export const planFeatures: Record<PlanTier, { completeAnswers: boolean; employerQuestions: boolean }> = {
+  free: { completeAnswers: false, employerQuestions: false },
+  pro: { completeAnswers: true, employerQuestions: true },
 };
 
 export type MeteredFeature = keyof (typeof planLimits)["free"];

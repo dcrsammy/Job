@@ -66,7 +66,9 @@ export async function processResumeUpload(db: SupabaseClient, userId: string, fi
         await recordAIUsage(db, userId, "resume_parse", usage, true, useCredit);
         parsed = p;
       } catch (err) {
+        console.error("[resume] AI parsing failed", err);
         if (err instanceof AIError && err.usage) await recordAIUsage(db, userId, "resume_parse", err.usage, false);
+        await audit(db, userId, "ai.error", { actor: "system", metadata: { feature: "resume_parse", message: String((err as Error).message).slice(0, 500) } });
         parsed = parseResumeHeuristically(text);
         note = "AI analysis was unavailable, so we used our basic reader. Please check your profile carefully.";
       }

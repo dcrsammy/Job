@@ -1,6 +1,6 @@
 "use client";
 import { useActionState, useState } from "react";
-import { generatePackage, saveAnswer, saveCoverLetter, saveResumeText, type BuilderState } from "@/app/actions/builder";
+import { answerEmployerQuestionsAction, generatePackage, saveAnswer, saveCoverLetter, saveResumeText, type BuilderState } from "@/app/actions/builder";
 import { SubmitButton } from "./submit-button";
 import { Notice, Textarea } from "./ui";
 
@@ -76,6 +76,27 @@ export function TextEditor({
         <CopyButton text={text} />
         {extra}
         <Saved state={state} />
+      </div>
+    </form>
+  );
+}
+
+export function EmployerQuestionsForm({ appId }: { appId: string }) {
+  const [state, action] = useActionState(answerEmployerQuestionsAction, undefined);
+  return (
+    <form action={action} className="flex flex-col gap-3">
+      <input type="hidden" name="appId" value={appId} />
+      <Textarea
+        name="questions"
+        rows={6}
+        required
+        placeholder={"Paste each question from the employer's form on its own line, e.g.\nWhy do you want to work here?\nDescribe a project you're proud of.\nWhat are your salary expectations?"}
+        aria-label="Questions from the employer's application form"
+      />
+      {state?.error ? <Notice tone="error">{state.error}</Notice> : null}
+      {state?.ok ? <Notice tone="ok">{state.ok}</Notice> : null}
+      <div>
+        <SubmitButton pending="Writing your answers… this can take a minute">Answer these questions</SubmitButton>
       </div>
     </form>
   );

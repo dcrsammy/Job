@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { generateApplication } from "@/lib/services/tailoring";
+import { answerEmployerQuestionsForApp, generateApplication } from "@/lib/services/tailoring";
 import { audit, UsageLimitError } from "@/lib/services/usage";
 
 export type BuilderState = { error?: string; ok?: string } | undefined;
@@ -82,4 +82,20 @@ export async function markApplied(form: FormData) {
   else await supabase.from("applications").insert({ user_id: user.id, job_id: app.job_id, ...patch });
   await audit(createAdminClient(), user.id, "application.applied", { entity: "job", entityId: app.job_id });
   revalidatePath("/", "layout");
+}
+
+export async function answerEmployerQuestionsAction(_: BuilderState, form: FormData): Promise<BuilderState> {
+  const { user } = await requireUser();
+  const appId = uuid.parse(form.get("appId"));
+  const text = String(form.get("questions") ?? "").slice(0, 8000);
+  try {
+    const n = await answerEmployerQuestionsForApp(createAdminClient(), user.id, appId, text);
+    const { data } = await createAdminClient().from("tailored_applications").select("job_id").eq("id", appId).single();
+    if (data) revalidatePath(`/jobs/${data.job_id}/apply`);
+    return { ok: `Answered ${n} question${n === 1 ? "" : "s"}. They're added to the list above.` };
+  } catch (err) {
+    if (err instanceof UsageLimitError) return { error: err.message };
+    console.error(err);
+    return { error: "Couldn't answer those questions. Try again." };
+  }
 }

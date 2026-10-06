@@ -30,7 +30,9 @@ export async function assertAllowance(db: SupabaseClient, userId: string, featur
   const a = await getAllowance(db, userId, feature);
   if (!a.allowed) {
     throw new UsageLimitError(
-      `You've used all ${a.limit} ${feature === "tailor" ? "tailored applications" : feature === "resume_parse" ? "resume analyses" : "job analyses"} included in your ${a.plan} plan this month.`,
+      a.limit === 0
+        ? "This is a Pro feature. Upgrade to Pro to use it."
+        : `You've used all ${a.limit} ${feature === "tailor" ? "tailored applications" : feature === "resume_parse" ? "resume analyses" : feature === "employer_questions" ? "employer-question answers" : "job analyses"} included in your ${a.plan} plan this month.`,
     );
   }
   return { useCredit: a.used >= a.limit };
@@ -72,4 +74,10 @@ export async function audit(
     entity_id: opts.entityId ?? null,
     metadata: opts.metadata ?? {},
   });
+}
+
+/** The user's current plan (Pro only while the subscription is active). */
+export async function getPlan(db: SupabaseClient, userId: string): Promise<PlanTier> {
+  const { data: sub } = await db.from("subscriptions").select("plan, status").eq("user_id", userId).maybeSingle();
+  return sub?.plan === "pro" && sub.status !== "canceled" ? "pro" : "free";
 }

@@ -92,7 +92,7 @@ describe("AI package assembly", () => {
       education_ids: ["d1"],
     },
     cover_letter: "Dear team, I have 9 years of experience.",
-    answers: [{ question: "Why us?", answer: "[Your reason]", needs_user_input: false }],
+    answers: [{ question: "Why us?", answer: "[Your reason]", needs_user_input: false, assumptions: [] }, { question: "Notice period?", answer: "Two weeks.", needs_user_input: false, assumptions: ["two-week notice period"] }],
     missing_info: [],
   };
   const pkg = assembleAiPackage(ai, candidate, job, null);
@@ -173,5 +173,37 @@ describe("resume parsing", () => {
   it("matches source text loosely but not loosely enough to accept inventions", () => {
     expect(supportedBySource("•  Built checkout pages in   React and TypeScript", resumeText)).toBe(true);
     expect(supportedBySource("Led migration to microservices on AWS", resumeText)).toBe(false);
+  });
+});
+
+describe("complete answers (Pro)", () => {
+  it("turns AI assumptions into explicit check items", async () => {
+    const { assembleAiPackage: assemble } = await import("./generate");
+    const pkg = assemble(
+      {
+        evidence_map: [],
+        recommendations: [],
+        resume: { headline: "Frontend Developer", summary: "", skills: ["React"], experiences: [], education_ids: [] },
+        cover_letter: "Dear team, I build checkout pages in React.",
+        answers: [{ question: "When can you start?", answer: "Within two weeks of an offer.", needs_user_input: false, assumptions: ["two-week notice period"] }],
+        missing_info: [],
+      },
+      candidate,
+      job,
+      null,
+      undefined,
+      { complete: true },
+    );
+    expect(pkg.answers[0].needsUserInput).toBe(true);
+    expect(pkg.missingInfo[0]).toEqual({ question: "When can you start?", why: "Assumed: two-week notice period" });
+  });
+
+  it("splits pasted form questions", async () => {
+    const { splitQuestions } = await import("./generate");
+    expect(splitQuestions("1. Why do you want to join us?\n\n- What is your notice period?\n• Salary expectations\nok")).toEqual([
+      "Why do you want to join us?",
+      "What is your notice period?",
+      "Salary expectations",
+    ]);
   });
 });

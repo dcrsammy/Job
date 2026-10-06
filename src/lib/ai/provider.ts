@@ -49,6 +49,7 @@ export class AIError extends Error {
   constructor(
     message: string,
     public usage?: AIUsage,
+    public status?: number,
   ) {
     super(message);
   }
@@ -80,7 +81,22 @@ export class AnthropicProvider implements AIProvider {
   ) {}
 
   async generateStructured<T>(req: StructuredRequest<T>): Promise<StructuredResult<T>> {
-    const model = this.models[req.tier ?? "quality"];
+    const tier = req.tier ?? "quality";
+    try {
+      return await this.call(req, this.models[tier]);
+    } catch (err) {
+      // If the stronger model isn't available to this API key (or is overloaded),
+      // fall back to the fast model rather than failing the user's request.
+      const status = err instanceof AIError ? err.status : undefined;
+      if (tier === "quality" && this.models.fast !== this.models.quality && (status === 400 || status === 403 || status === 404 || status === 429 || status === 529 || (status ?? 0) >= 500)) {
+        console.error(`[ai] ${this.models.quality} failed (${status}); retrying with ${this.models.fast}: ${(err as Error).message}`);
+        return await this.call(req, this.models.fast);
+      }
+      throw err;
+    }
+  }
+
+  private async call<T>(req: StructuredRequest<T>, model: string): Promise<StructuredResult<T>> {
     const body = {
       model,
       max_tokens: req.maxTokens ?? 4096,
@@ -107,7 +123,7 @@ export class AnthropicProvider implements AIProvider {
     }
     if (!res || !res.ok) {
       const text = res ? await res.text().catch(() => "") : "";
-      throw new AIError(`Claude API error ${res?.status}: ${text.slice(0, 300)}`);
+      throw new AIError(`Claude API error ${res?.status} (${model}): ${text.slice(0, 300)}`, undefined, res?.status);
     }
 
     const json = (await res.json()) as {

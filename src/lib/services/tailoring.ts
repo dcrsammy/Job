@@ -2,11 +2,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { analyzeJobWithAI } from "../ai/job-analysis";
 import { AIError, getAIProvider } from "../ai/provider";
-import { buildAiPackage, buildTemplatePackage, type ApplicationPackage } from "../tailoring/generate";
+import { answerEmployerQuestions, buildAiPackage, buildTemplatePackage, splitQuestions, type ApplicationPackage } from "../tailoring/generate";
+import { planFeatures } from "../config";
 import type { JobRequirement } from "../types";
 import { loadCandidate, toTailorCandidate } from "./candidate";
 import { scoreSingleJob, matchToRow } from "./matching";
-import { assertAllowance, audit, recordAIUsage, recordTemplateUsage } from "./usage";
+import { assertAllowance, audit, getPlan, recordAIUsage, recordTemplateUsage, UsageLimitError } from "./usage";
 
 export async function refineJobRequirements(db: SupabaseClient, userId: string, jobId: string): Promise<boolean> {
   const provider = getAIProvider();
@@ -64,10 +65,13 @@ export async function generateApplication(db: SupabaseClient, userId: string, jo
   let pkg: ApplicationPackage;
   if (provider) {
     try {
-      pkg = await buildAiPackage(provider, candidate, tailorJob, match);
+      const complete = planFeatures[await getPlan(db, userId)].completeAnswers;
+      pkg = await buildAiPackage(provider, candidate, tailorJob, match, { complete });
       if (pkg.usage) await recordAIUsage(db, userId, "tailor", pkg.usage, true, useCredit);
     } catch (err) {
+      console.error("[tailor] AI drafting failed", err);
       if (err instanceof AIError && err.usage) await recordAIUsage(db, userId, "tailor", err.usage, false);
+      await audit(db, userId, "ai.error", { actor: "system", metadata: { feature: "tailor", message: String((err as Error).message).slice(0, 500) } });
       pkg = buildTemplatePackage(candidate, tailorJob, match);
       pkg.recommendations.unshift("AI drafting was unavailable, so this is a template. Fill in the [placeholders].");
       await recordTemplateUsage(db, userId, "tailor");
@@ -116,4 +120,63 @@ export async function generateApplication(db: SupabaseClient, userId: string, jo
 
   await audit(db, userId, "application.generated", { entity: "tailored_application", entityId: saved.id, metadata: { job_id: jobId, generator: pkg.generator, warnings: pkg.warnings.length } });
   return { id: saved.id, pkg };
+}
+
+/**
+ * Pro: answer the questions pasted from an employer's application form and
+ * add them to the application package.
+ */
+export async function answerEmployerQuestionsForApp(db: SupabaseClient, userId: string, appId: string, pasted: string): Promise<number> {
+  const questions = splitQuestions(pasted);
+  if (questions.length === 0) throw new UsageLimitError("Paste at least one question, one per line.");
+  const { useCredit } = await assertAllowance(db, userId, "employer_questions");
+  const provider = getAIProvider();
+  if (!provider) throw new UsageLimitError("AI answers aren't available right now. Please try again later.");
+
+  const { data: app } = await db.from("tailored_applications").select("id, job_id, fabrication_warnings, missing_info").eq("id", appId).eq("user_id", userId).single();
+  if (!app) throw new Error("Application not found.");
+  const full = await loadCandidate(db, userId);
+  if (!full) throw new Error("Upload your resume first.");
+  const { data: job } = await db.from("jobs").select("title, employer_name, description_text, remote_type, location_raw").eq("id", app.job_id).single();
+  if (!job) throw new Error("Job not found.");
+
+  let result;
+  try {
+    result = await answerEmployerQuestions(
+      provider,
+      toTailorCandidate(full),
+      { title: job.title, employerName: job.employer_name, descriptionText: job.description_text, remoteType: job.remote_type, locationRaw: job.location_raw, requirements: [] },
+      questions,
+    );
+  } catch (err) {
+    console.error("[employer-questions] failed", err);
+    if (err instanceof AIError && err.usage) await recordAIUsage(db, userId, "employer_questions", err.usage, false);
+    await audit(db, userId, "ai.error", { actor: "system", metadata: { feature: "employer_questions", message: String((err as Error).message).slice(0, 500) } });
+    throw new UsageLimitError("We couldn't answer those questions just now. Please try again.");
+  }
+  await recordAIUsage(db, userId, "employer_questions", result.usage, true, useCredit);
+
+  const { count } = await db.from("application_answers").select("id", { count: "exact", head: true }).eq("tailored_application_id", appId);
+  await db.from("application_answers").insert(
+    result.answers.map((a, i) => ({
+      user_id: userId,
+      tailored_application_id: appId,
+      question: a.question,
+      answer: a.answer,
+      needs_user_input: a.assumptions.length > 0,
+      sort_order: (count ?? 0) + i,
+    })),
+  );
+  const assumed = result.answers.flatMap((a) => a.assumptions.map((why) => ({ question: a.question, why: `Assumed: ${why}` })));
+  await db
+    .from("tailored_applications")
+    .update({
+      fabrication_warnings: [...((app.fabrication_warnings as unknown[]) ?? []), ...result.warnings],
+      missing_info: [...((app.missing_info as unknown[]) ?? []), ...assumed],
+      status: "draft",
+      reviewed_at: null,
+    })
+    .eq("id", appId);
+  await audit(db, userId, "application.employer_questions", { entity: "tailored_application", entityId: appId, metadata: { count: questions.length } });
+  return result.answers.length;
 }

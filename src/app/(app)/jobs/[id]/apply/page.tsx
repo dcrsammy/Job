@@ -2,13 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { markApplied, saveChecklist } from "@/app/actions/builder";
-import { CopyButton, GenerateForm, TextEditor } from "@/components/builder-editors";
+import { CopyButton, EmployerQuestionsForm, GenerateForm, TextEditor } from "@/components/builder-editors";
 import { FitTape } from "@/components/fit-tape";
 import { SubmitButton } from "@/components/submit-button";
 import { cx, ExternalButton, Notice, PageHeader, Panel, SectionTitle, Tag } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { STATUS_LABEL } from "@/lib/format";
 import { getAllowance } from "@/lib/services/usage";
+import { planFeatures } from "@/lib/config";
 import type { EvidenceItem } from "@/lib/tailoring/generate";
 import type { GuardWarning } from "@/lib/tailoring/guard";
 
@@ -29,6 +30,19 @@ function DownloadLinks({ appId, doc }: { appId: string; doc: "resume" | "cover" 
   );
 }
 
+function ProUpsell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-[10px] border border-dashed border-line-strong p-5">
+      <p className="flex items-center gap-2 font-semibold">
+        <Tag tone="tape">Pro</Tag> {children}
+      </p>
+      <p className="mt-1 text-[14px] text-ink-2">
+        Pro writes every answer in full: why you want the job, your strengths, salary, availability. It also answers the questions from the employer's own form. You review and edit before sending.
+      </p>
+    </div>
+  );
+}
+
 export default async function ApplyPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/.test(id)) notFound();
@@ -41,6 +55,7 @@ export default async function ApplyPage({ params }: { params: Promise<{ id: stri
     getAllowance(supabase, user.id, "tailor").catch(() => null),
   ]);
   if (!job) notFound();
+  const features = planFeatures[allowance?.plan ?? "free"];
   const src = (job.job_sources as unknown as { name: string } | null)?.name;
   const applyLabel = job.verification_status === "official" ? `Apply on ${job.employer_name}'s site` : `Apply via ${src ?? "the job board"}`;
 
@@ -62,14 +77,29 @@ export default async function ApplyPage({ params }: { params: Promise<{ id: stri
       <>
         {header}
         <Panel className="max-w-[720px] p-6">
-          <h2 className="text-[18px] font-bold">What you'll get</h2>
+          <h2 className="flex items-center gap-2 text-[18px] font-bold">What you'll get {features.completeAnswers ? <Tag tone="tape">Pro</Tag> : null}</h2>
           <ul className="mt-3 list-disc space-y-1.5 pl-5 text-ink-2">
             <li>Each requirement in the listing matched to evidence from your profile, with gaps shown honestly</li>
             <li>A version of your resume reordered and reworded for this job, using only facts you've given us</li>
-            <li>A short cover letter draft with [placeholders] for the parts only you can write</li>
-            <li>Likely application questions with suggested answers</li>
+            {features.completeAnswers ? (
+              <>
+                <li>A complete cover letter, ready to send</li>
+                <li>Full answers to 12–15 likely questions, including why you want the job, your strengths, salary and availability</li>
+                <li>A list of anything we had to assume, such as a notice period, so you can check it</li>
+              </>
+            ) : (
+              <>
+                <li>A short cover letter draft with [placeholders] for the parts only you can write</li>
+                <li>Likely application questions with suggested answers</li>
+              </>
+            )}
             <li>A final checklist to review before you apply</li>
           </ul>
+          {!features.completeAnswers ? (
+            <div className="mt-5">
+              <ProUpsell>Want every answer written for you?</ProUpsell>
+            </div>
+          ) : null}
           {match?.disqualifiers?.length ? (
             <div className="mt-4">
               <Notice tone="warn">Before you spend time on this: {match.disqualifiers.join("; ")}.</Notice>
@@ -177,7 +207,7 @@ export default async function ApplyPage({ params }: { params: Promise<{ id: stri
           </section>
 
           <section aria-labelledby="qa">
-            <SectionTitle aside={needsInput ? <span className="text-[13.5px] font-medium text-possible">{needsInput} need your input</span> : null}>
+            <SectionTitle aside={needsInput ? <span className="text-[13.5px] font-medium text-possible">{needsInput} to check</span> : null}>
               <span id="qa">Likely application questions</span>
             </SectionTitle>
             <div className="flex flex-col gap-5">
@@ -190,10 +220,26 @@ export default async function ApplyPage({ params }: { params: Promise<{ id: stri
             </div>
           </section>
 
+          <section aria-labelledby="eq">
+            <SectionTitle aside={features.employerQuestions ? <Tag tone="tape">Pro</Tag> : null}>
+              <span id="eq">Questions from the employer's form</span>
+            </SectionTitle>
+            {features.employerQuestions ? (
+              <>
+                <p className="mb-3 max-w-[65ch] text-[14.5px] text-ink-2">
+                  Open the application page, copy the questions it asks, and paste them here. We'll write a full answer to each, based on your profile and this listing, and add them to the list above.
+                </p>
+                <EmployerQuestionsForm appId={app.id} />
+              </>
+            ) : (
+              <ProUpsell>Answer the employer's own questions</ProUpsell>
+            )}
+          </section>
+
           {missing.length ? (
             <section aria-labelledby="mi">
               <SectionTitle>
-                <span id="mi">Information that would strengthen this application</span>
+                <span id="mi">{missing.some((m) => m.why.startsWith("Assumed:")) ? "Check these before you send" : "Information that would strengthen this application"}</span>
               </SectionTitle>
               <ul className="space-y-2">
                 {missing.map((m, i) => (
