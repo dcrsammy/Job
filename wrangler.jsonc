@@ -5,5 +5,13 @@
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
+  // Keep variables set in the Cloudflare dashboard (e.g. NEXT_PUBLIC_SITE_URL) across deploys.
+  // Secrets (service role key, Anthropic key) are never stored here.
+  "keep_vars": true,
+  "vars": {
+    "NEXT_PUBLIC_SUPABASE_URL": "https://gmzzormtwcxnjlkcrlrl.supabase.co",
+    // The anon key is public by design; row-level security protects the data.
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdtenpvcm10d2N4bmpsa2NybHJsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEyNjc4NjQsImV4cCI6MjEwNjg0Mzg2NH0.7-6f5HvHUpAz9lnriMaO-dfCg_OOukmm4BxMdcrOcwA"
+  }
 }
