@@ -114,7 +114,8 @@ function factSource(c: TailorCandidate): FactSource {
     c.headline ?? "",
     ...c.experiences.flatMap((e) => [e.title, e.employer, e.description ?? "", ...e.highlights]),
     ...c.educations.map((e) => educationLine(e)),
-    c.yearsExperience != null ? String(c.yearsExperience) : "",
+    // "about 7 years" is a fair rounding of 7.5 years of experience
+    c.yearsExperience != null ? `${c.yearsExperience} ${Math.floor(c.yearsExperience)} ${Math.round(c.yearsExperience)}` : "",
   ];
   const skills = new Set<string>();
   for (const s of c.skills) skills.add(s.normalized || normalizeSkillName(s.name));
@@ -480,7 +481,7 @@ export function assembleAiPackage(
   }
   for (const e of c.educations) factText.set(`edu:${e.id}`, educationLine(e));
   if (c.summary) factText.set("summary", c.summary);
-  if (c.yearsExperience != null) factText.set("years", String(c.yearsExperience));
+  if (c.yearsExperience != null) factText.set("years", `${c.yearsExperience} ${Math.floor(c.yearsExperience)} ${Math.round(c.yearsExperience)}`);
 
   const expById = new Map(c.experiences.map((e) => [e.id, e]));
   const experiences: TailoredResume["experiences"] = [];

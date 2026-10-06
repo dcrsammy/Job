@@ -328,7 +328,7 @@ export function skillDisplayName(slug: string): string {
  */
 export const IMPLIES: Record<string, string[]> = {
   nextjs: ["react", "javascript"],
-  react: ["javascript"],
+  react: ["javascript", "html"],
   "react-native": ["react", "javascript"],
   typescript: ["javascript"],
   vue: ["javascript"],
@@ -355,7 +355,8 @@ export const IMPLIES: Record<string, string[]> = {
   snowflake: ["sql"],
   redshift: ["sql"],
   dbt: ["sql", "etl"],
-  tailwind: ["css"],
+  tailwind: ["css", "html"],
+  css: ["html"],
   flutter: ["dart"],
   supabase: ["postgresql"],
 };

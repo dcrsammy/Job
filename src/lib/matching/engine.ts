@@ -25,7 +25,7 @@ import {
 import { detectIndustries, INDUSTRY_LABEL } from "./industries";
 import { familySimilarity, roleFamiliesForTitle } from "./role-families";
 
-export const ENGINE_VERSION = "1.3.0";
+export const ENGINE_VERSION = "1.4.0";
 
 export const WEIGHTS = {
   skills: 45,
@@ -180,10 +180,13 @@ export function scoreMatch(candidate: CandidateForMatch | PreparedCandidate, job
         if (cr > 0) matchedSkills.push(slug);
         else missingPreferredSkills.push(slug);
       }
+      // One weighted coverage: nice-to-haves count a quarter as much as key skills.
       const effective = (w: number) => (w <= 8 ? w : 8 + (w - 8) * 0.5);
-      const reqCov = reqWeight > 0 ? Math.min(1, reqCredit / effective(reqWeight)) : null;
-      const prefCov = preferred.size > 0 ? Math.min(1, prefCredit / effective(preferred.size)) : null;
-      let ratio = reqCov != null ? (prefCov != null ? 0.8 * reqCov + 0.2 * prefCov : reqCov) : 0.1 + 0.8 * (prefCov ?? 0);
+      const PREF = 0.25;
+      let ratio =
+        reqWeight > 0
+          ? Math.min(1, (reqCredit + PREF * prefCredit) / (effective(reqWeight) + PREF * effective(preferred.size)))
+          : 0.1 + 0.8 * Math.min(1, prefCredit / Math.max(1, effective(preferred.size)));
       if (missingCoreSkills.length) ratio *= 0.5;
       skillRatio = ratio;
       const points = Math.round(max * ratio);

@@ -18,7 +18,16 @@ const eslintConfig = [
       "out/**",
       "build/**",
       "next-env.d.ts",
+      ".open-next/**",
+      "cloudflare-env.d.ts",
     ],
+  },
+  {
+    rules: {
+      // Plain apostrophes in copy are fine in React.
+      "react/no-unescaped-entities": "off",
+      "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", destructuredArrayIgnorePattern: "^_" }],
+    },
   },
 ];
 

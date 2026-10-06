@@ -19,16 +19,20 @@ export interface GuardWarning {
 
 const NUMBER_RE = /(?<![A-Za-z])(\$|€|£|₦)?\d[\d,.]*\s*(%|k|m|x|\+)?(?![A-Za-z])/gi;
 
-/** Numbers like "40%", "$2M", "10x" that do not occur in the source. */
+/** Numbers like "40%", "$2M", "10x" that do not occur (as the same figure) in the source. */
 export function unsupportedNumbers(text: string, source: string): string[] {
-  const src = source.replace(/,/g, "").toLowerCase();
+  const src = source.replace(/(\d),(\d{3})/g, "$1$2").toLowerCase();
   const out: string[] = [];
-  for (const m of text.matchAll(NUMBER_RE)) {
+  for (const m of text.replace(/(\d),(\d{3})/g, "$1$2").matchAll(NUMBER_RE)) {
     const raw = m[0].trim();
     const digits = raw.replace(/[^\d.]/g, "").replace(/\.$/, "");
-    if (!digits || digits.length === 0) continue;
-    // years like 2019 and small ordinals are fine if they're in the source; everything is checked the same way
-    if (!src.includes(digits)) out.push(raw);
+    if (!digits) continue;
+    const suffix = (m[2] ?? "").toLowerCase();
+    const esc = digits.replace(".", "\\.");
+    // The same number must appear on its own (not as part of a longer number),
+    // with the same unit when one is given ("30%" doesn't support "3x").
+    const re = new RegExp(`(?<![\\d.])${esc}(?![\\d]|\\.\\d)${suffix === "%" ? "\\s*%" : suffix === "x" ? "\\s*x" : suffix === "k" ? "\\s*k" : suffix === "m" ? "\\s*m" : ""}`, "i");
+    if (!re.test(src)) out.push(raw);
   }
   return Array.from(new Set(out));
 }

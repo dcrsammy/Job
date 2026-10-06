@@ -14,7 +14,8 @@ export const ROLE_FAMILIES: RoleFamily[] = [
   { key: "backend", label: "Backend engineering", group: "engineering", patterns: /\b(back[- ]?end|api engineer|server[- ]side|platform engineer|java developer|python developer|golang|go engineer)\b/ },
   { key: "fullstack", label: "Full-stack engineering", group: "engineering", patterns: /\b(full[- ]?stack|product engineer)\b/ },
   { key: "mobile", label: "Mobile engineering", group: "engineering", patterns: /\b(mobile|ios|android|flutter|react native)\b.*\b(engineer|developer)\b|\b(ios|android) (engineer|developer)\b/ },
-  { key: "devops", label: "DevOps / SRE / infrastructure", group: "engineering", patterns: /\b(devops|sre|site reliability|infrastructure|cloud engineer|platform reliability|systems engineer|production engineer)\b/ },
+  { key: "devops", label: "DevOps / SRE / infrastructure", group: "engineering", patterns: /\b(devops|sre|site reliability|infrastructure|cloud engineer|platform reliability|systems engineer|production engineer|containeri[sz]ation|virtuali[sz]ation|kubernetes|linux|kernel|networking engineer|storage engineer)\b/ },
+  { key: "embedded", label: "Embedded / hardware", group: "hardware", patterns: /\b(embedded|firmware|hardware|fpga|silicon|asic|electrical engineer)\b/ },
   { key: "security", label: "Security engineering", group: "engineering", patterns: /\b(security|appsec|infosec|penetration|threat|soc analyst)\b/ },
   { key: "qa", label: "QA / test engineering", group: "engineering", patterns: /\b(qa|quality assurance|test(ing)? engineer|sdet|test automation)\b/ },
   { key: "data-engineering", label: "Data engineering", group: "data", patterns: /\b(data engineer|analytics engineer|etl|data platform)\b/ },
@@ -59,8 +60,8 @@ export function familySimilarity(a: string[], b: string[]): number {
       const fy = ROLE_FAMILY_BY_KEY.get(y);
       if (!fx || !fy) continue;
       if (fx.group === fy.group) {
-        // Generic "software" is close to any engineering specialty.
-        const s = x === "software" || y === "software" ? 0.85 : 0.65;
+        // A generic "engineer" title says little about the specialty, so it's only a partial match.
+        const s = x === "software" || y === "software" ? 0.7 : 0.6;
         best = Math.max(best, s);
       }
     }

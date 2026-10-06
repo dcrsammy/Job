@@ -82,8 +82,9 @@ export function normalizeJob(raw: RawJob, ctx: NormalizeContext): NormalizedJob 
   if (remoteType === "unknown" && /\bremote\b/i.test(title)) remoteType = "remote";
 
   const salaryFromText = raw.salary?.raw ? parseSalaryText(raw.salary.raw) : null;
-  const salaryMin = raw.salary?.min ?? salaryFromText?.min ?? null;
-  const salaryMax = raw.salary?.max ?? salaryFromText?.max ?? null;
+  const round = (n: number | null | undefined) => (n == null || !Number.isFinite(n) ? null : Math.round(n));
+  const salaryMin = round(raw.salary?.min ?? salaryFromText?.min);
+  const salaryMax = round(raw.salary?.max ?? salaryFromText?.max);
   const salaryCurrency = raw.salary?.currency ?? salaryFromText?.currency ?? null;
   const salaryPeriod = raw.salary?.period ?? salaryFromText?.period ?? (salaryMin ? "year" : null);
 

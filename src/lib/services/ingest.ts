@@ -128,7 +128,10 @@ export async function ingestSource(db: SupabaseClient, source: SourceRow, env: R
       const { data: upserted, error } = await db.from("jobs").upsert(rows, { onConflict: "source_id,external_id" }).select("id, external_id, requirements_extracted_by");
       if (error) throw new Error(`jobs upsert: ${error.message}`);
 
-      for (const j of part) existingIds.has(j.externalId) ? summary.updated++ : summary.inserted++;
+      for (const j of part) {
+        if (existingIds.has(j.externalId)) summary.updated++;
+        else summary.inserted++;
+      }
 
       // Replace heuristic requirements. Jobs refined by AI keep their AI requirements.
       const idByExternal = new Map(

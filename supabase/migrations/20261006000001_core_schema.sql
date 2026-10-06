@@ -373,6 +373,8 @@ create table public.saved_jobs (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles (id) on delete cascade,
   job_id uuid not null references public.jobs (id) on delete cascade,
+  -- one row per user/job interaction: saved, hidden and/or viewed
+  saved boolean not null default false,
   hidden boolean not null default false,
   viewed_at timestamptz,
   note text,

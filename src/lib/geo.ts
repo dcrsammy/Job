@@ -143,8 +143,8 @@ const REGION_PATTERNS: [RegExp, string][] = [
   [/\bafrica\b/i, "AFRICA"],
   [/\bmena\b/i, "MENA"],
   [/\b(latam|latin america|south america)\b/i, "LATAM"],
-  [/\bnorth america\b/i, "NORTH_AMERICA"],
-  [/\bamericas\b/i, "AMERICAS"],
+  [/\b(north america|namer|noram)\b/i, "NORTH_AMERICA"],
+  [/\b(americas|amer)\b/i, "AMERICAS"],
   [/\b(apac|asia[- ]pacific|asia)\b/i, "APAC"],
 ];
 
@@ -221,9 +221,13 @@ export function parseLocation(parts: (string | null | undefined)[], remoteHint?:
   let remoteType: RemoteType = remoteHint ?? "unknown";
   if (remoteType === "unknown") {
     if (/\bhybrid\b/i.test(text)) remoteType = "hybrid";
-    else if (/\b(remote|anywhere|worldwide|work from home|wfh|distributed)\b/i.test(text)) remoteType = "remote";
+    else if (/\b(remote|anywhere|worldwide|work from home|wfh|distributed|home[- ]based)\b/i.test(text)) remoteType = "remote";
     else if (/\b(on-?site|in[- ]office|office-based)\b/i.test(text) || countries.length > 0) remoteType = "onsite";
   }
+
+  // A location that names only a region ("AMER", "EMEA") with no city or country
+  // means the role is distributed within that region.
+  if (remoteType === "unknown" && countries.length === 0 && regions.length > 0) remoteType = "remote";
 
   let remoteRegions: string[] = [];
   if (remoteType === "remote") {
