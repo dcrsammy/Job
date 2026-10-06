@@ -96,19 +96,28 @@ export class AnthropicProvider implements AIProvider {
     }
   }
 
+  /** Models that reject forced tool use or a custom temperature (learned at runtime). */
+  private static noForcedTool = new Set<string>();
+  private static noTemperature = new Set<string>();
+
   private async call<T>(req: StructuredRequest<T>, model: string): Promise<StructuredResult<T>> {
-    const body = {
-      model,
-      max_tokens: req.maxTokens ?? 4096,
-      temperature: req.temperature ?? 0.2,
-      system: req.system,
-      tools: [{ name: req.toolName, description: req.toolDescription, input_schema: req.schema }],
-      tool_choice: { type: "tool", name: req.toolName },
-      messages: [{ role: "user", content: req.prompt }],
+    const buildBody = () => {
+      const forced = !AnthropicProvider.noForcedTool.has(model);
+      return {
+        model,
+        max_tokens: req.maxTokens ?? 4096,
+        ...(AnthropicProvider.noTemperature.has(model) ? {} : { temperature: req.temperature ?? 0.2 }),
+        // Some models don't allow forcing a specific tool; then we ask for it in the prompt instead.
+        system: forced ? req.system : `${req.system}\n\nRespond only by calling the \`${req.toolName}\` tool exactly once, with every required field filled in.`,
+        tools: [{ name: req.toolName, description: req.toolDescription, input_schema: req.schema }],
+        tool_choice: forced ? { type: "tool", name: req.toolName } : { type: "auto" },
+        messages: [{ role: "user", content: req.prompt }],
+      };
     };
 
     let res: Response | null = null;
-    for (let attempt = 0; attempt < 3; attempt++) {
+    let adaptations = 0;
+    for (let attempt = 0; attempt < 4; attempt++) {
       res = await this.fetchImpl("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
@@ -116,8 +125,21 @@ export class AnthropicProvider implements AIProvider {
           "x-api-key": this.apiKey,
           "anthropic-version": "2023-06-01",
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify(buildBody()),
       });
+      if (res.status === 400 && adaptations < 2) {
+        const text = await res.clone().text().catch(() => "");
+        if (/tool_choice/i.test(text) && !AnthropicProvider.noForcedTool.has(model)) {
+          AnthropicProvider.noForcedTool.add(model);
+          adaptations++;
+          continue;
+        }
+        if (/temperature/i.test(text) && !AnthropicProvider.noTemperature.has(model)) {
+          AnthropicProvider.noTemperature.add(model);
+          adaptations++;
+          continue;
+        }
+      }
       if (res.status !== 429 && res.status !== 529 && res.status < 500) break;
       await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
     }
